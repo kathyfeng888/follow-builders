@@ -4,7 +4,7 @@
 // Follow Builders — Delivery Script
 // ============================================================================
 // Sends a digest to the user via their chosen delivery method.
-// Supports: Telegram bot, Email (via Resend), or stdout (default).
+// Supports: Feishu/Lark webhook, Telegram bot, Email (via Resend), or stdout.
 //
 // Usage:
 //   echo "digest text" | node deliver.js
@@ -15,6 +15,7 @@
 // and API keys from ~/.follow-builders/.env
 //
 // Delivery methods:
+//   - "feishu": sends via Feishu custom bot webhook (needs FEISHU_WEBHOOK_URL env)
 //   - "telegram": sends via Telegram Bot API (needs TELEGRAM_BOT_TOKEN + chat ID)
 //   - "email": sends via Resend API (needs RESEND_API_KEY + email address)
 //   - "stdout" (default): just prints to terminal
@@ -122,6 +123,72 @@ async function sendTelegram(text, botToken, chatId) {
   }
 }
 
+// -- Feishu/Lark Webhook Delivery --------------------------------------------
+
+// Sends the digest via Feishu custom bot webhook.
+// The user creates a custom bot in a Feishu group and provides the webhook URL.
+// Supports both interactive card (rich markdown) and text fallback.
+async function sendFeishu(text, webhookUrl) {
+  // Feishu webhook has a ~30KB limit per message.
+  // Split into chunks if too long.
+  const MAX_LEN = 15000;
+  const chunks = [];
+  let remaining = text;
+  while (remaining.length > 0) {
+    if (remaining.length <= MAX_LEN) {
+      chunks.push(remaining);
+      break;
+    }
+    let splitAt = remaining.lastIndexOf('\n\n', MAX_LEN);
+    if (splitAt < MAX_LEN * 0.3) splitAt = remaining.lastIndexOf('\n', MAX_LEN);
+    if (splitAt < MAX_LEN * 0.3) splitAt = MAX_LEN;
+    chunks.push(remaining.slice(0, splitAt));
+    remaining = remaining.slice(splitAt);
+  }
+
+  for (const chunk of chunks) {
+    // Try interactive card first (better formatting)
+    const cardPayload = {
+      msg_type: 'interactive',
+      card: {
+        header: {
+          title: { tag: 'plain_text', content: '🤖 AI Builders Digest' },
+          subtitle: { tag: 'plain_text', content: new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }) }
+        },
+        elements: [
+          { tag: 'markdown', content: chunk }
+        ]
+      }
+    };
+
+    let res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cardPayload)
+    });
+
+    // If card fails, fall back to plain text
+    if (!res.ok) {
+      const textPayload = {
+        msg_type: 'text',
+        content: { text: chunk }
+      };
+      res = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(textPayload)
+      });
+    }
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Feishu API error: ${err}`);
+    }
+
+    if (chunks.length > 1) await new Promise(r => setTimeout(r, 1000));
+  }
+}
+
 // -- Email Delivery (Resend) -------------------------------------------------
 
 // Sends the digest via Resend's email API.
@@ -180,6 +247,18 @@ async function main() {
           status: 'ok',
           method: 'telegram',
           message: 'Digest sent to Telegram'
+        }));
+        break;
+      }
+
+      case 'feishu': {
+        const webhookUrl = process.env.FEISHU_WEBHOOK_URL;
+        if (!webhookUrl) throw new Error('FEISHU_WEBHOOK_URL not found in environment');
+        await sendFeishu(digestText, webhookUrl);
+        console.log(JSON.stringify({
+          status: 'ok',
+          method: 'feishu',
+          message: 'Digest sent to Feishu'
         }));
         break;
       }
