@@ -14,6 +14,8 @@ const FEED_X_URL = 'https://raw.githubusercontent.com/zarazhangrui/follow-builde
 const FEED_PODCASTS_URL = 'https://raw.githubusercontent.com/zarazhangrui/follow-builders/main/feed-podcasts.json';
 const FEED_BLOGS_URL = 'https://raw.githubusercontent.com/zarazhangrui/follow-builders/main/feed-blogs.json';
 
+const CODEX_RELEASES_URL = 'https://api.github.com/repos/openai/codex/releases?per_page=3';
+
 async function fetchJSON(url) {
   const res = await fetch(url);
   if (!res.ok) return null;
@@ -154,6 +156,56 @@ async function main() {
   }
 
   // =========================================
+  // Section 4: Codex Updates (GitHub Releases)
+  // =========================================
+  console.log(`---\n## ⚡ Codex 更新\n`);
+
+  let codexCount = 0;
+  try {
+    const codexRes = await fetch(CODEX_RELEASES_URL);
+    if (codexRes.ok) {
+      const releases = await codexRes.json();
+      for (const rel of releases) {
+        if (rel.draft || rel.prerelease) continue;
+        codexCount++;
+        const date = rel.published_at ? formatDate(rel.published_at) : '';
+        const notes = (rel.body || '')
+          .replace(/## /g, '### ')  // demote headings for markdown nesting
+          .replace(/### Changelog[\s\S]*/g, '') // skip changelog PR list
+          .replace(/Full Changelog:.*/g, '')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+
+        console.log(`### [${escapeMD(rel.name || rel.tag_name)}](${rel.html_url})`);
+        console.log(`发布时间：${date}\n`);
+
+        if (notes) {
+          // Extract only the meaningful parts (max 500 chars)
+          const lines = notes.split('\n').filter(l => l.trim());
+          let summary = '';
+          for (const line of lines) {
+            if (line.startsWith('### ')) continue;
+            if (line.match(/^#\d+/)) continue;
+            summary += line + '\n';
+            if (summary.length > 600) { summary += '...'; break; }
+          }
+          if (summary.trim()) {
+            console.log(`${escapeMD(summary.trim())}\n`);
+          }
+        }
+      }
+
+      if (codexCount === 0) {
+        console.log('暂无新的正式版本发布。\n');
+      }
+    } else {
+      console.log('Codex 版本数据暂未获取到。\n');
+    }
+  } catch (e) {
+    console.log(`Codex 数据获取失败，跳过。\n`);
+  }
+
+  // =========================================
   // Footer with stats
   // =========================================
   const podcastCount = (feedPodcasts?.podcasts?.length) || 0;
@@ -161,8 +213,8 @@ async function main() {
   const builderCount = (feedX?.x?.length) || 0;
 
   console.log(`---\n`);
-  console.log(`📊 **本日概览**：${builderCount} 位 Builder · ${totalTweets} 条推文 · ${podcastCount} 个播客 · ${blogCount} 篇博客`);
-  console.log(`🔗 全部内容来自 [Follow Builders](https://github.com/zarazhangrui/follow-builders) 数据源`);
+  console.log(`📊 **本日概览**：${builderCount} 位 Builder · ${totalTweets} 条推文 · ${podcastCount} 个播客 · ${blogCount} 篇博客 · ${codexCount} 个 Codex 版本`);
+  console.log(`🔗 全部内容来自 [Follow Builders](https://github.com/zarazhangrui/follow-builders) + Codex GitHub Releases`);
 }
 
 main().catch(err => {
