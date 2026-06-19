@@ -1,0 +1,35 @@
+name: Daily AI Builders Digest
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  generate-and-deliver:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: cd scripts && npm install
+
+      - name: Generate Digest
+        run: |
+          cd scripts
+          node generate-digest.js > /tmp/digest.md
+
+      - name: Send to Feishu
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+        run: |
+          cd scripts
+          mkdir -p ~/.follow-builders
+          echo '{"delivery":{"method":"feishu"}}' > ~/.follow-builders/config.json
+          cat /tmp/digest.md | node deliver.js
